@@ -47,7 +47,7 @@ Platform | Description | Unit | Details
 ### Automatic
 Installation can be done using [HACS](https://hacs.xyz/) by [adding a custom repository](https://hacs.xyz/docs/faq/custom_repositories/).
 
-[![Open your Home Assistant instance and open a repository inside the Home Assistant Community Store.](https://my.home-assistant.io/badges/hacs_repository.svg)](https://my.home-assistant.io/redirect/hacs_repository/?owner=patman15&repository=BMS_BLE-HA&category=Integration)
+[![Open your Home Assistant instance and open a repository inside the Home Assistant Community Store.](https://my.home-assistant.io/badges/hacs_repository.svg)](https://my.home-assistant.io/redirect/hacs_repository/?owner=BikeAtor&repository=BMS_BLE-HA&category=Integration)
 
 ### Manual
 1. Using the tool of choice open the directory (folder) for your HA configuration (where you find `configuration.yaml`).

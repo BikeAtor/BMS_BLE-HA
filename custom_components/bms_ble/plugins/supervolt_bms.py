@@ -24,13 +24,14 @@ from ..const import (
     # ATTR_RUNTIME,
     ATTR_TEMPERATURE,
     ATTR_VOLTAGE,
+    ATTR_CELL_VOLTAGES,
     KEY_CELL_VOLTAGE,
     KEY_CELL_COUNT
 )
 from .basebms import BaseBMS, BMSsample
 
 BAT_TIMEOUT: Final = 10
-MAX_TIME_S: Final = 240
+MAX_TIME_S: Final = 120
 
 LOGGER = logging.getLogger(__name__)
 
@@ -63,10 +64,11 @@ class SupervoltData:
     def parse(self, data: bytearray):
         try:
             if data:
-                LOGGER.info("parse data: {}".format(type(data)))
+                if self.verbose:
+                    LOGGER.debug("parse data: {}".format(type(data)))
                 if len(data) == 128:
                     if self.verbose:
-                        LOGGER.info("parse Realtimedata: {}".format(type(data)))
+                        LOGGER.debug("parse Realtimedata: {}".format(type(data)))
                     if type(data) is bytearray: 
                         data = bytes(data)
                     if type(data) is bytes:
@@ -256,12 +258,16 @@ class SupervoltData:
             LOGGER.error(sys.exc_info(), exc_info=True)
 
     def getData(self):
+        if (time.time() - self.lastUpdatetime) > MAX_TIME_S or not self.totalV:
+            # data is old
+            LOGGER.debug("data too old")
+            return None
         data = {
             ATTR_VOLTAGE: self.totalV,
             ATTR_DELTA_VOLTAGE: self.totalV,
             ATTR_CURRENT: self.loadA,
             ATTR_BATTERY_LEVEL: self.soc,
-            ATTR_POWER: (self.totalV * self.loadA),
+            #ATTR_POWER: (self.totalV * self.loadA),
             ATTR_CYCLE_CAP: self.remainingAh,
             KEY_CELL_COUNT: 4
         }  # set fixed values for dummy battery
@@ -269,8 +275,14 @@ class SupervoltData:
             data |= {
                 ATTR_TEMPERATURE: self.tempC[0]
             }
-        for i in range(0, 3):
-            data |= {f"{KEY_CELL_VOLTAGE}{i}": self.cellV[i]}
+        for i in range(0,4):
+            data |= {f"{KEY_CELL_VOLTAGE}{i+1}": self.cellV[i]}
+        data |= {ATTR_CELL_VOLTAGES: [
+                    v
+                    for k, v in data.items()
+                    if k.startswith(KEY_CELL_VOLTAGE)
+                ]}
+
         return data
 
     def resetValues(self):
@@ -401,7 +413,6 @@ class BMS(BaseBMS):
             LOGGER.debug("BMS %s already connected", self._ble_device.name)
 
     def _notification_handler(self, _sender, data: bytearray) -> None:
-        LOGGER.debug("notification")
         LOGGER.debug(
             "(%s) Rx BLE data: %s %s",
             self._ble_device.name,
@@ -418,11 +429,12 @@ class BMS(BaseBMS):
 
     async def disconnect(self) -> None:
         """Disconnect connection to BMS if active."""
-        LOGGER.debug("disconnect")
         if self._client and self._client.is_connected:
             LOGGER.debug("Disconnecting BMS (%s)", self._ble_device.name)
             try:
                 self._data_event.clear()
+                # stop notify
+                await self._client.stop_notify("6e400003-b5a3-f393-e0a9-e50e24dcca9e")
                 await self._client.disconnect()
             except BleakError:
                 LOGGER.warning("Disconnect failed!")
@@ -433,24 +445,37 @@ class BMS(BaseBMS):
 
     async def async_update(self) -> BMSsample:
         """Update battery status information."""
-        await self._connect()
-        assert self._client is not None
+        try:
+            await self._connect()
+            if self._client:
+                # connection established
+                self.supervoltData.resetValues()
 
-        if (time.time() - self.supervoltData.lastUpdatetime) > MAX_TIME_S:
-            # data is old
-            self.supervoltData.resetValues()
+                data = bytes(":000250000E03~", "ascii")
+                handle = "6e400002-b5a3-f393-e0a9-e50e24dcca9e"
+                await self._client.write_gatt_char(char_specifier=handle, data=data)
+                await asyncio.wait_for(self._wait_event(), timeout=BAT_TIMEOUT)
 
-        data = bytes(":000250000E03~", "ascii")
-        handle = "6e400002-b5a3-f393-e0a9-e50e24dcca9e"
-        await self._client.write_gatt_char(char_specifier=handle, data=data)
-        await asyncio.wait_for(self._wait_event(), timeout=BAT_TIMEOUT)
-
-        data = bytes(":001031000E05~", "ascii")
-        handle = "6e400002-b5a3-f393-e0a9-e50e24dcca9e"
-        await self._client.write_gatt_char(char_specifier=handle, data=data)
-        await asyncio.wait_for(self._wait_event(), timeout=BAT_TIMEOUT)
+                data = bytes(":001031000E05~", "ascii")
+                handle = "6e400002-b5a3-f393-e0a9-e50e24dcca9e"
+                await self._client.write_gatt_char(char_specifier=handle, data=data)
+                await asyncio.wait_for(self._wait_event(), timeout=BAT_TIMEOUT)
+                await self.disconnect()
+        except:
+            LOGGER.error(sys.exc_info(), exc_info=True)    
 
         data = self.supervoltData.getData()
+        assert data is not None
+        self.calc_values(
+            data,
+            {
+                ATTR_POWER,
+                ATTR_BATTERY_CHARGING,
+                #ATTR_CYCLE_CAP,
+                #ATTR_RUNTIME,
+                ATTR_DELTA_VOLTAGE,
+                #ATTR_TEMPERATURE,
+            },
+        )
         
-        await self.disconnect()
         return data

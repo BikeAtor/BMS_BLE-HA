@@ -399,13 +399,14 @@ class BMS(BaseBMS):
     async def _connect(self) -> None:
         """Connect to the BMS and setup notification if not connected."""
 
-        if self._client is None or not self._client.is_connected:
+        if self._client is None:
+                self._client = BleakClient(
+                    self._ble_device,
+                    disconnected_callback=self._on_disconnect,
+                    services=[UUID_SERVICE],
+                )
+        if not self._client.is_connected:
             LOGGER.debug("Connecting BMS (%s)", self._ble_device.name)
-            self._client = BleakClient(
-                self._ble_device,
-                disconnected_callback=self._on_disconnect,
-                services=[UUID_SERVICE],
-            )
             await self._client.connect()
             await self._client.start_notify("6e400003-b5a3-f393-e0a9-e50e24dcca9e", self._notification_handler)
             LOGGER.debug("notify started")

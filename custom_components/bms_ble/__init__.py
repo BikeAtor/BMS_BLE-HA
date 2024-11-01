@@ -45,9 +45,6 @@ async def async_setup_entry(hass: HomeAssistant, entry: BTBmsConfigEntry) -> boo
     plugin = await async_import_module(hass, entry.data["type"])
     coordinator = BTBmsCoordinator(hass, ble_device, bms_device=plugin.BMS(ble_device))
 
-    # Query the device the first time, initialise coordinator.data
-    await coordinator.async_config_entry_first_refresh()
-
     try:
         # Query the device the first time, initialise coordinator.data
         await coordinator.async_config_entry_first_refresh()
@@ -60,6 +57,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: BTBmsConfigEntry) -> boo
     except:
         await coordinator.stop()
         raise
+
     return True
 
 

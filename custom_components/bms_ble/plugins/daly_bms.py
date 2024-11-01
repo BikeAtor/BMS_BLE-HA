@@ -49,6 +49,7 @@ class BMS(BaseBMS):
     MAX_CELLS: Final = 32
     MAX_TEMP: Final = 8
     INFO_LEN: Final = 84 + HEAD_LEN + CRC_LEN + MAX_CELLS + MAX_TEMP
+    MOS_TEMP_POS: Final = HEAD_LEN + 8
 
     def __init__(self, ble_device: BLEDevice, reconnect: bool = False) -> None:
         """Intialize private BMS members."""
@@ -119,11 +120,12 @@ class BMS(BaseBMS):
 
         if self._client is None or not self._client.is_connected:
             LOGGER.debug("Connecting BMS (%s)", self._ble_device.name)
-            self._client = BleakClient(
-                self._ble_device,
-                disconnected_callback=self._on_disconnect,
-                services=[UUID_SERVICE],
-            )
+            if self._client is None:
+                self._client = BleakClient(
+                    self._ble_device,
+                    disconnected_callback=self._on_disconnect,
+                    services=[UUID_SERVICE],
+                )
             await self._client.connect()
             await self._client.start_notify(UUID_RX, self._notification_handler)
         else:
@@ -145,18 +147,17 @@ class BMS(BaseBMS):
         await self._connect()
         assert self._client is not None
 
-        await self._client.write_gatt_char(UUID_TX, data=self.HEAD_READ + self.MOS_INFO)
-
-        await asyncio.wait_for(self._wait_event(), timeout=BAT_TIMEOUT)
-
         data = {}
 
-        if self._data is not None:
+        await self._client.write_gatt_char(UUID_TX, data=self.HEAD_READ + self.MOS_INFO)
+        await asyncio.wait_for(self._wait_event(), timeout=BAT_TIMEOUT)
+
+        if self._data is not None and sum(self._data[self.MOS_TEMP_POS :][:2]):
             LOGGER.debug("%s: MOS info: %s", self._ble_device.name, self._data)
             data |= {
                 f"{KEY_TEMP_VALUE}0": float(
                     int.from_bytes(
-                        self._data[self.HEAD_LEN + 8 : self.HEAD_LEN + 10],
+                        self._data[self.MOS_TEMP_POS :][:2],
                         byteorder="big",
                         signed=True,
                     )
@@ -165,7 +166,6 @@ class BMS(BaseBMS):
             }
 
         await self._client.write_gatt_char(UUID_TX, data=self.HEAD_READ + self.CMD_INFO)
-
         await asyncio.wait_for(self._wait_event(), timeout=BAT_TIMEOUT)
 
         if self._data is None or len(self._data) != self.INFO_LEN:
@@ -179,8 +179,10 @@ class BMS(BaseBMS):
         }
 
         # get temperatures
+        # shift index if MOS temperature is available
+        t_off: Final[int] = 1 if f"{KEY_TEMP_VALUE}0" in data else 0
         data |= {
-            f"{KEY_TEMP_VALUE}{(idx-62-self.HEAD_LEN)>>1}": float(
+            f"{KEY_TEMP_VALUE}{((idx-64-self.HEAD_LEN)>>1) + t_off}": float(
                 int.from_bytes(self._data[idx : idx + 2], byteorder="big", signed=True)
                 - 40
             )

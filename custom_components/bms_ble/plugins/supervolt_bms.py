@@ -392,13 +392,37 @@ class BMS(BaseBMS):
         return [{"local_name": "libatt*", "connectable": True}]
 
     @staticmethod
+    def uuid_services() -> list[str]:
+        """Return list of 128-bit UUIDs of services required by BMS."""
+        return [normalize_uuid_str("0000")]  # change service UUID here!
+
+    @staticmethod
+    def uuid_rx() -> str:
+        """Return 16-bit UUID of characteristic that provides notification/read property."""
+        return "#changeme"
+
+    @staticmethod
+    def uuid_tx() -> str:
+        """Return 16-bit UUID of characteristic that provides write property."""
+        return "#changeme"
+
+    @staticmethod
+    def _calc_values() -> set[str]:
+        return {
+            ATTR_POWER,
+            ATTR_BATTERY_CHARGING,
+            ATTR_CYCLE_CAP,
+            ATTR_DELTA_VOLTAGE,
+            ATTR_TEMPERATURE,
+        }
+
+    @staticmethod
     def device_info() -> dict[str, str]:
         """Return device information for the battery management system."""
         return {"manufacturer": "Supervolt", "model": "Black"}
 
     async def _connect(self) -> None:
         """Connect to the BMS and setup notification if not connected."""
-
         if self._client is None:
                 self._client = BleakClient(
                     self._ble_device,
@@ -444,7 +468,7 @@ class BMS(BaseBMS):
         """Disconnect callback function."""
         LOGGER.debug("Disconnected from BMS (%s)", self._ble_device.name)
 
-    async def async_update(self) -> BMSsample:
+    async def _async_update(self) -> BMSsample:
         """Update battery status information."""
         try:
             await self._connect()
@@ -467,16 +491,5 @@ class BMS(BaseBMS):
 
         data = self.supervoltData.getData()
         assert data is not None
-        self.calc_values(
-            data,
-            {
-                ATTR_POWER,
-                ATTR_BATTERY_CHARGING,
-                #ATTR_CYCLE_CAP,
-                #ATTR_RUNTIME,
-                ATTR_DELTA_VOLTAGE,
-                #ATTR_TEMPERATURE,
-            },
-        )
         
         return data
